@@ -1,235 +1,133 @@
-# pi-package-template
+# pi-answer-now
 
-A minimal starter template for building [pi](https://pi.dev) packages.
+End a reasoning model's thinking block while it writes.
 
-Use this as a starting point to create your own pi package with extensions, skills, prompt templates, and themes.
+Some reasoning models think for a long time before they answer. Basalt offers
+`POST /v1/answer_now` to tell one running reply to close its thinking section
+and start writing the answer. This extension adds two ways to call it:
 
-## Quick Start
+- `/answer` in the chat.
+- A keyboard shortcut, `alt+a` by default.
+
+The extension changes nothing about the requests pi already sends. It reads the
+request id from the response headers, and posts that id back on the side.
+
+## Install
 
 ```bash
-# 1. Clone this template
-git clone https://github.com/YOU/pi-package-template.git my-pi-package
-cd my-pi-package
-
-# 2. Install dev dependencies (for type checking)
-npm install
-
-# 3. Edit package.json — set name, description, author, repository
-
-# 4. Start building! Edit the files in extensions/, skills/, prompts/, themes/
-
-# 5. Test locally
-pi -e .
-
-# 6. Publish to npm
-npm publish
+pi install npm:pi-answer-now   # or: pi install git:github.com/torhve/pi-answer-now
 ```
 
-## What's Included
+Restart pi, or run `/reload`.
 
-```
-pi-package-template/
-├── extensions/
-│   └── index.ts          # Sample extension (tool + command + event)
-├── skills/
-│   └── hello/SKILL.md    # Sample skill
-├── prompts/
-│   └── hello.md          # Sample prompt template (/hello)
-├── themes/
-│   └── template.json     # Sample theme
-├── package.json          # Pi manifest + npm config
-├── tsconfig.json         # TypeScript config (type checking only)
-├── .gitignore
-├── LICENSE               # MIT
-├── CHANGELOG.md
-└── README.md             # This file
-```
+## Use
 
-## Package Structure
+Press the key while the model is thinking. The model closes its thinking block
+and writes the answer. pi shows one line in the chat with the result.
 
-Pi packages can contain any combination of these resources:
+Works on reasoning models only. See [Errors](#errors) for what each answer means.
 
-### Extensions (`extensions/`)
+## Settings
 
-TypeScript modules that extend pi's behavior. Capabilities include:
-
-- **Custom tools** — functions the LLM can call
-- **Slash commands** — user-invoked commands like `/hello`
-- **Event handlers** — react to session lifecycle events
-- **Custom UI** — render custom components in the terminal
-- **Keybindings** — register keyboard shortcuts
-- **CLI flags** — add custom command-line options
-
-```typescript
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
-
-export default function (pi: ExtensionAPI) {
-  // Register a tool the LLM can call
-  pi.registerTool({
-    name: "my_tool",
-    label: "My Tool",
-    description: "What this tool does",
-    parameters: Type.Object({
-      input: Type.String({ description: "Some input" }),
-    }),
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
-      return {
-        content: [{ type: "text", text: `Result: ${params.input}` }],
-        details: {},
-      };
-    },
-  });
-
-  // Register a slash command
-  pi.registerCommand("my-cmd", {
-    description: "Do something",
-    handler: async (args, ctx) => {
-      ctx.ui.notify("Done!", "info");
-    },
-  });
-
-  // React to events
-  pi.on("session_start", async (_event, ctx) => {
-    ctx.ui.notify("Loaded!", "info");
-  });
-}
-```
-
-### Skills (`skills/`)
-
-Markdown files with instructions the LLM loads on-demand. Place each skill in its own folder with a `SKILL.md` file.
-
-```markdown
-# My Skill
-
-Use this skill when the user asks about X.
-
-## Steps
-1. Do this
-2. Then that
-```
-
-### Prompt Templates (`prompts/`)
-
-Markdown files that become slash commands. The filename (without `.md`) becomes the command name.
-
-```markdown
-Review the current codebase and suggest improvements.
-```
-
-Users invoke it with `/review` (if the file is `review.md`).
-
-### Themes (`themes/`)
-
-JSON files that define color schemes.
+Add this to `~/.pi/agent/settings.json` to change the key:
 
 ```json
 {
-  "name": "my-theme",
-  "colors": {
-    "primary": "#61afef",
-    "success": "#98c379"
+  "pi-answer-now": {
+    "keybinding": "ctrl+alt+a"
   }
 }
 ```
 
-## Testing Your Package
+Run `/reload` after editing. Omit `pi-answer-now` to keep the default `alt+a`.
 
-```bash
-# Run without installing (ephemeral)
-pi -e .
+Pi writes user keybindings in `~/.pi/agent/keybindings.json`. That file lists
+named actions, and an extension is not one of them, so it cannot rebind this
+one. The setting above is the supported way.
 
-# Or install locally
-pi install ./path/to/your-package
+Key form is `modifier+key`. Modifiers are `ctrl`, `shift`, `alt`, and `super`.
+`pi` rejects an unusable form on startup and tells you which key it used
+instead.
 
-# Type check
-npm run typecheck
+## How it finds the server
 
-# Lint
-npm run lint
+The extension takes the address from the model pi has in the session. Nothing
+to configure.
 
-# Fix lint issues
-npm run lint:fix
+| Setup | What the extension does |
+| --- | --- |
+| Model points at basalt directly | Calls `<base>/v1/answer_now`. |
+| Model runs behind [llama-swap](https://github.com/mostlygeek/llama-swap) | llama-swap keeps a fixed route table, so the first call gets a 404. The extension then calls `<mount>/upstream/<model>/v1/answer_now`, which llama-swap forwards to the engine. It signs that call with the credentials pi already holds for the provider. |
+| Cloud provider, or llama.cpp | No answer-now feature. One readable line in the chat. |
 
-# Format code
-npm run format
+### Capability probe
+
+On startup and on a model change, the extension reads one URL:
+
+```text
+GET <origin>/props?model=<model>&autoload=false
 ```
 
-## CI/CD
+Basalt answers with `basalt.capabilities`, and `answer_now` appears in that
+list. llama.cpp and llama-swap do not report it. The `autoload=false` part
+matters: llama-swap then refuses instead of loading a model to answer a probe.
 
-This template includes two GitHub Actions workflows:
+The result is cached per engine and model, and is used only to write a clearer
+error line. The extension never uses it to skip the call. If
+[pi-llama-swap](https://github.com/torhve/pi-llama-swap) already recorded
+`answerNow` for the model in `~/.pi/agent/pi-llama-swap.json`, the extension
+reads that value and skips the probe.
 
-### CI (`ci.yml`)
+## Errors
 
-Runs on every push and PR to `main`:
-- **Type check** — `tsc --noEmit`
-- **Lint** — biome check
+| Line | Meaning |
+| --- | --- |
+| `Answer now: closed the thinking of <id> (was thinking).` | Worked. The id names the request that was interrupted. |
+| `No request id yet for this model …` | The request has not reached the engine yet, usually because llama-swap is loading the model or the engine is reading a long prompt. Press again once the model starts. |
+| `More than one request for <model> streams at once …` | pi has two requests to that model running. The extension will not guess which one to stop. |
+| `The model is already writing its answer.` | Too late. The thinking was already closed. |
+| `That reply has already finished.` | Too late. |
+| `This model is running with thinking off …` | There was no thinking block to close. |
+| `The engine no longer knows that request.` | The turn moved on. Press again during the new request. |
+| `<engine> does not offer answer now.` | The probe read this engine's props, and answer now is not there. |
+| `<engine> has no /v1/answer_now route …` | The server answered a bare 404. It is not basalt, or it is older than the feature. |
+| `<engine> answered 404 on /v1/answer_now and on /upstream/<model>/v1/answer_now …` | A server in front of the engine strips both paths. Answer now cannot reach the engine. |
+| `<engine> refused this call as unauthenticated (401).` | The server wants a key the extension does not have. |
+| `Could not reach <engine>: …` | The server was unreachable or did not answer within two seconds. |
 
-### Release (`release.yml`)
+## Requirements
 
-Uses [release-please](https://github.com/googleapis/release-please) to automate releases:
+- pi 1.5.2 or newer. Pi 1.5.2 is the version this package is tested against.
+- An engine that serves `/v1/answer_now`. [Basalt](https://github.com/jesdga95/basalt)
+  0.3.3 and newer have it.
+- A reasoning model with thinking on.
 
-1. Write conventional commits (`feat:`, `fix:`, `feat!:`, etc.)
-2. On push to `main`, release-please opens/updates a **Release PR** with:
-   - Updated `CHANGELOG.md` (auto-generated from commits)
-   - Version bump in `package.json`
-3. Merge the Release PR → release-please creates a **GitHub Release** + git tag
-4. The `publish` job auto-publishes to **npm** (requires `NPM_TOKEN` secret)
+## Known limits
 
-#### GitHub Setup
-
-1. **Create an npm access token**
-   - Go to [npmjs.com → Access Tokens](https://www.npmjs.com/settings/~/tokens)
-   - Generate a new **Automation** token (bypasses 2FA for CI)
-
-2. **Add the secret to your GitHub repo**
-   - Go to your repo → **Settings** → **Secrets and variables** → **Actions**
-   - Click **New repository secret**
-   - Name: `NPM_TOKEN`
-   - Value: paste your npm access token
-
-3. **Allow GitHub Actions to create PRs** (required for release-please)
-   - Go to your repo → **Settings** → **Actions** → **General**
-   - Under **Workflow permissions**, select **Read and write permissions**
-   - Check **Allow GitHub Actions to create and approve pull requests**
-
-4. Write conventional commits — everything else is automatic!
-
-#### How `pi update` works
-
-Once your package is published, users can update with:
-
-```bash
-pi update                    # update pi and all packages
-pi update --extensions       # update packages only
-pi update npm:your-package   # update one package
-```
-
-Pi compares the installed version against `npm view <name> version` and installs `@latest` if a newer version is found. Pinned versions (e.g. `npm:pkg@1.0.0`) are never auto-updated.
-
-#### Manual publish (alternative)
+- **It interrupts the request that streams right now.** The engine writes its
+  request id into every chunk of the reply, and the extension uses that id. If
+  more than one request for the model streams at once, the extension refuses
+  instead of guessing. The reply line names the id it used.
+- **The server must pass the answer-now path through.** llama-swap reaches the
+  engine for `/v1/answer_now` only through
+  `/upstream/<model>/v1/answer_now`. A proxy that strips `/upstream` blocks the
+  feature, and the extension says so instead of guessing.
+- **Model names that hold a slash are handled by llama-swap's route.**
+  llama-swap matches the model name inside the path. No live basalt model with a
+  slash in its name was tested.
+## Development
 
 ```bash
-npm login
-npm publish
+npm run typecheck   # tsc --noEmit
+npm run lint        # biome check
 ```
 
-## Key Concepts
+Test against pi with only this package loaded:
 
-- **`peerDependencies`** — Pi core packages (`@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `typebox`) must be listed as peer dependencies with `"*"` range. They are provided by pi at runtime.
-- **`pi` manifest** — The `pi` key in `package.json` tells pi which directories contain resources.
-- **`keywords`** — Include `"pi-package"` so your package appears in the [pi package gallery](https://pi.dev/packages).
-- **`files`** — Controls what's included in the npm tarball. Only list your resource directories and docs.
-- **No build step** — Pi loads TypeScript extensions directly via [jiti](https://github.com/unjs/jiti). No compilation needed.
-
-## Learn More
-
-- [Pi Documentation](https://pi.dev/docs/latest)
-- [Extensions Guide](https://pi.dev/docs/latest/extensions)
-- [Skills Guide](https://pi.dev/docs/latest/skills)
-- [Package Gallery](https://pi.dev/packages)
-- [Extension Examples](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent/examples/extensions)
+```bash
+pi -ne -e . --no-session
+# then press alt+a, or type /answer
+```
 
 ## License
 
