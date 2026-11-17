@@ -1,6 +1,6 @@
 {
   "name": "pi-answer-now",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "End a reasoning model's thinking block on demand. Adds /answer and a configurable keybinding for engines that expose POST /v1/answer_now.",
   "type": "module",
   "license": "MIT",
